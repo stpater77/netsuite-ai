@@ -1,0 +1,20 @@
+{
+  "title": "Accept Customer Payments",
+  "navigation": [
+    "Navigate to Customers > Accounts Receivable > Accept Customer Payments ."
+  ],
+  "steps": [
+    "Enter the following in the Primary Informationfield group:",
+    "Verify the following in the Classificationfield group:",
+    "Click the Applysubtab, Invoicestab.",
+    "Check Applynext to the invoices created inthe Invoice a Sales Order and Create an",
+    "Click the Payment Method tab and enter the following:",
+    "Check # 274",
+    "Click Save.",
+    "Click the Actionsdropdown list from the invoice header and select GL Impact . Review"
+  ],
+  "fields": {},
+  "scenario": null,
+  "intent": "accept_customer_payments",
+  "source_file": "4 - Accounts Receivable - 3-1-2026.pdf"
+}

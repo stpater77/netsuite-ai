@@ -1,0 +1,19 @@
+{
+  "title": "Create an Invoice",
+  "navigation": [
+    "Navigate to Customers > Sales > Create Invoices ."
+  ],
+  "steps": [
+    "Enter the following in the Primary Informationfield group:",
+    "Verify the following in the Classificationfield group:",
+    "Click theItemssubtab, Itemssublistand enter the following:",
+    "Click Add.",
+    "Click the Billingsubtab. Verify the Terms are Net 30.",
+    "Click Save.",
+    "Click the Actionsdropdown list from the invoice header and select GL Impact . Review"
+  ],
+  "fields": {},
+  "scenario": "Scenario: received a check from REI for items sold",
+  "intent": "create_an_invoice",
+  "source_file": "4 - Accounts Receivable - 3-1-2026.pdf"
+}

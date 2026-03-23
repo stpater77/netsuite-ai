@@ -1,0 +1,185 @@
+import psycopg2
+import ollama
+
+# =========================
+# CONFIG
+# =========================
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 5433,
+    "database": "postgres",
+    "user": "postgres",
+    "password": ""
+}
+
+EMBED_MODEL = "nomic-embed-text"
+LLM_MODEL = "llama3"
+
+# =========================
+# CONNECT
+# =========================
+conn = psycopg2.connect(**DB_CONFIG)
+cur = conn.cursor()
+
+# =========================
+# INTENT MAP
+# =========================
+INTENT_MAP = {
+    "ar__payment__accept_customer_payments": [
+        "accept payment",
+        "receive payment",
+        "customer payment",
+        "apply payment"
+    ],
+    "ar__invoice__create_an_invoice": [
+        "create invoice",
+        "make invoice",
+        "invoice customer"
+    ],
+    "ar__invoice__invoice_a_sales_order": [
+        "invoice sales order",
+        "bill sales order"
+    ]
+}
+
+def detect_intent(query):
+    query = query.lower()
+    for intent, keywords in INTENT_MAP.items():
+        for keyword in keywords:
+            if keyword in query:
+                return intent
+    return None
+
+# =========================
+# EMBEDDING (SAFE)
+# =========================
+def embed_query(query):
+    try:
+        response = ollama.embeddings(
+            model=EMBED_MODEL,
+            prompt=query
+        )
+
+        embedding = response.get("embedding")
+
+        # Guard against bad embeddings
+        if not embedding or not isinstance(embedding, list):
+            return None
+
+        return embedding
+
+    except Exception as e:
+        print(f"DEBUG: Embedding error → {e}")
+        return None
+
+# =========================
+# SEARCH (FIXED)
+# =========================
+def search(query):
+    intent = detect_intent(query)
+
+    try:
+        # 🔥 Intent shortcut
+        if intent:
+            print(f"DEBUG: Intent matched → {intent}")
+
+            cur.execute("""
+                SELECT metadata
+                FROM documents
+                WHERE metadata->>'intent' = %s
+                LIMIT 1
+            """, (intent,))
+
+            result = cur.fetchone()
+            if result:
+                return result[0]
+
+        # 🔁 Vector fallback
+        embedding = embed_query(query)
+
+        if embedding is None:
+            print("DEBUG: Invalid embedding — skipping vector search")
+            return None
+
+        cur.execute("""
+            SELECT content, metadata
+            FROM documents
+            ORDER BY embedding <=> %s::vector
+            LIMIT 3
+        """, (embedding,))
+
+        results = cur.fetchall()
+
+        if not results:
+            return None
+
+        return results[0][1]  # metadata
+
+    except Exception as e:
+        print(f"DEBUG: DB error → {e}")
+        conn.rollback()   # 🔥 critical fix
+        return None
+
+# =========================
+# PROMPT BUILDER
+# =========================
+def build_prompt(question, meta):
+    return f"""
+You are a NetSuite AI consultant.
+
+Rules:
+- Only use provided workflow
+- Be concise
+- Use numbered steps
+
+QUESTION:
+{question}
+
+WORKFLOW:
+Title: {meta.get('title')}
+Navigation: {meta.get('navigation')}
+Steps: {meta.get('steps')}
+
+ANSWER:
+"""
+
+# =========================
+# CHAT LOOP
+# =========================
+def chat():
+    print("\n🚀 AI Ready (PostgreSQL + pgvector)\n")
+
+    while True:
+        q = input("You: ")
+
+        if q.lower() == "exit":
+            break
+
+        meta = search(q)
+
+        if not meta:
+            print("\nAI: No workflow found\n")
+            continue
+
+        prompt = build_prompt(q, meta)
+
+        try:
+            response = ollama.generate(
+                model=LLM_MODEL,
+                prompt=prompt
+            )
+
+            print("\nAI:\n")
+            print(response["response"])
+            print("\n----------------------\n")
+
+        except Exception as e:
+            print(f"\nAI Error: {e}\n")
+
+# =========================
+# MAIN
+# =========================
+if __name__ == "__main__":
+    chat()
+nano chat.py
+nano chat.py

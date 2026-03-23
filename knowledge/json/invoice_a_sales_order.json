@@ -1,0 +1,17 @@
+{
+  "title": "Invoice a Sales Order",
+  "navigation": [
+    "Navigate to Customers > Sales > Invoice Sales Orders ."
+  ],
+  "steps": [
+    "Click Submit.",
+    "Click Refreshuntil the Submission Status is Complete. Verify there arezero errors.",
+    "Click Complete hyperlink in the Submission Status column.",
+    "Verify the invoice was created from the sales order number noted in step 3.",
+    "Click the Actionsdropdown list from the invoice header and select GL Impact . Review"
+  ],
+  "fields": {},
+  "scenario": "Scenario: An employee of REI physically came into a Gill, Inc. store and purchased goods, but",
+  "intent": "invoice_a_sales_order",
+  "source_file": "4 - Accounts Receivable - 3-1-2026.pdf"
+}
