@@ -1,15 +1,16 @@
 import psycopg2
 import ollama
+import os
 
 # =========================
-# CONFIG
+# CONFIG (RAILWAY READY)
 # =========================
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5433,
-    "database": "postgres",
-    "user": "postgres",
-    "password": ""
+    "host": os.getenv("PGHOST"),
+    "port": os.getenv("PGPORT"),
+    "database": os.getenv("PGDATABASE"),
+    "user": os.getenv("PGUSER"),
+    "password": os.getenv("PGPASSWORD")
 }
 
 LLM_MODEL = "llama3"
@@ -48,7 +49,7 @@ INTENT_MAP = {
 }
 
 # =========================
-# INTENT DETECTION (FLEXIBLE)
+# INTENT DETECTION
 # =========================
 def detect_intent(query):
     query = query.lower()
@@ -67,7 +68,6 @@ def detect_intent(query):
 def search(query):
     intent = detect_intent(query)
 
-    # DEBUG
     print(f"DEBUG: Detected intent → {intent}")
 
     try:
