@@ -1,17 +1,34 @@
 import psycopg2
-import ollama
 import os
 
+# Try importing ollama (only works locally)
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except:
+    OLLAMA_AVAILABLE = False
+
 # =========================
-# CONFIG (RAILWAY READY)
+# DATABASE CONFIG (DUAL)
 # =========================
-DB_CONFIG = {
-    "host": os.getenv("PGHOST"),
-    "port": os.getenv("PGPORT"),
-    "database": os.getenv("PGDATABASE"),
-    "user": os.getenv("PGUSER"),
-    "password": os.getenv("PGPASSWORD")
-}
+if os.getenv("PGHOST"):
+    # Railway config
+    DB_CONFIG = {
+        "host": os.getenv("PGHOST"),
+        "port": os.getenv("PGPORT"),
+        "database": os.getenv("PGDATABASE"),
+        "user": os.getenv("PGUSER"),
+        "password": os.getenv("PGPASSWORD")
+    }
+else:
+    # Local config
+    DB_CONFIG = {
+        "host": "localhost",
+        "port": 5433,
+        "database": "postgres",
+        "user": "postgres",
+        "password": ""
+    }
 
 LLM_MODEL = "llama3"
 
@@ -129,13 +146,25 @@ def handle_user_message(q: str) -> str:
 
     prompt = build_prompt(q, meta)
 
-    try:
-        response = ollama.generate(
-            model=LLM_MODEL,
-            prompt=prompt
-        )
+    # =========================
+    # TRY OLLAMA (LOCAL ONLY)
+    # =========================
+    if OLLAMA_AVAILABLE:
+        try:
+            response = ollama.generate(
+                model=LLM_MODEL,
+                prompt=prompt
+            )
+            return response["response"]
+        except Exception as e:
+            print(f"DEBUG: Ollama error → {e}")
 
-        return response["response"]
+    # =========================
+    # FALLBACK (CLOUD SAFE)
+    # =========================
+    return f"""
+{meta.get('title')}
 
-    except Exception as e:
-        return f"AI Error: {e}"
+Steps:
+{meta.get('steps')}
+"""
