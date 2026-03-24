@@ -1,42 +1,37 @@
 import psycopg2
 import os
 
-# Try importing ollama (only works locally)
+# Try importing ollama (local only)
 try:
     import ollama
     OLLAMA_AVAILABLE = True
 except:
     OLLAMA_AVAILABLE = False
 
-# =========================
-# DATABASE CONFIG (DUAL)
-# =========================
-if os.getenv("PGHOST"):
-    # Railway config
-    DB_CONFIG = {
-        "host": os.getenv("PGHOST"),
-        "port": os.getenv("PGPORT"),
-        "database": os.getenv("PGDATABASE"),
-        "user": os.getenv("PGUSER"),
-        "password": os.getenv("PGPASSWORD")
-    }
-else:
-    # Local config
-    DB_CONFIG = {
-        "host": "localhost",
-        "port": 5433,
-        "database": "postgres",
-        "user": "postgres",
-        "password": ""
-    }
-
 LLM_MODEL = "llama3"
 
 # =========================
-# CONNECT
+# DATABASE CONNECTION (SAFE)
 # =========================
-conn = psycopg2.connect(**DB_CONFIG)
-cur = conn.cursor()
+def get_connection():
+    try:
+        if os.getenv("DATABASE_URL"):
+            # Railway
+            print("DEBUG: Using Railway DB")
+            return psycopg2.connect(os.getenv("DATABASE_URL"))
+        else:
+            # Local
+            print("DEBUG: Using Local DB")
+            return psycopg2.connect(
+                host="localhost",
+                port=5433,
+                database="postgres",
+                user="postgres",
+                password=""
+            )
+    except Exception as e:
+        print(f"DEBUG: DB connection failed → {e}")
+        return None
 
 # =========================
 # INTENT MAP
@@ -84,10 +79,15 @@ def detect_intent(query):
 # =========================
 def search(query):
     intent = detect_intent(query)
-
     print(f"DEBUG: Detected intent → {intent}")
 
+    conn = get_connection()
+    if not conn:
+        return None
+
     try:
+        cur = conn.cursor()
+
         if intent:
             print(f"DEBUG: Intent matched → {intent}")
 
@@ -99,11 +99,9 @@ def search(query):
             """, (intent,))
 
             result = cur.fetchone()
-
             print(f"DEBUG: DB result → {result}")
 
-            if result:
-                return result[0]
+            return result[0] if result else None
 
         return None
 
@@ -111,6 +109,9 @@ def search(query):
         print(f"DEBUG: DB error → {e}")
         conn.rollback()
         return None
+
+    finally:
+        conn.close()
 
 # =========================
 # PROMPT BUILDER
@@ -147,7 +148,7 @@ def handle_user_message(q: str) -> str:
     prompt = build_prompt(q, meta)
 
     # =========================
-    # TRY OLLAMA (LOCAL ONLY)
+    # OLLAMA (LOCAL ONLY)
     # =========================
     if OLLAMA_AVAILABLE:
         try:
@@ -160,7 +161,7 @@ def handle_user_message(q: str) -> str:
             print(f"DEBUG: Ollama error → {e}")
 
     # =========================
-    # FALLBACK (CLOUD SAFE)
+    # FALLBACK (RAILWAY SAFE)
     # =========================
     return f"""
 {meta.get('title')}
