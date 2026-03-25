@@ -6,25 +6,37 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: #f5f5f5;
+      margin: 0;
       display: flex;
       flex-direction: column;
       height: 100vh;
-      margin: 0;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    body.light {
+      background: #f5f5f5;
+      color: black;
+    }
+
+    body.dark {
+      background: #121212;
+      color: white;
     }
 
     h2 {
       text-align: center;
       padding: 10px;
+      margin: 0;
       background: #111;
       color: white;
-      margin: 0;
     }
 
     #chat {
       flex: 1;
       padding: 20px;
       overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
 
     .bubble {
@@ -39,48 +51,52 @@
       background: #007bff;
       color: white;
       align-self: flex-end;
-      margin-left: auto;
     }
 
     .bot {
       background: #e0e0e0;
       color: black;
       align-self: flex-start;
-      margin-right: auto;
+    }
+
+    body.dark .bot {
+      background: #333;
+      color: white;
     }
 
     #input-area {
       display: flex;
       padding: 10px;
-      background: white;
       border-top: 1px solid #ccc;
     }
 
     textarea {
       flex: 1;
-      resize: none;
       padding: 10px;
-      font-size: 14px;
     }
 
     button {
-      padding: 10px 20px;
+      padding: 10px;
       margin-left: 10px;
-      background: #007bff;
-      color: white;
-      border: none;
       cursor: pointer;
     }
 
-    button:hover {
-      background: #0056b3;
+    #top-bar {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: #222;
+      color: white;
     }
   </style>
 </head>
 
-<body>
+<body class="light">
 
-<h2>NetSuite AI Assistant</h2>
+<div id="top-bar">
+  <span>NetSuite AI Assistant</span>
+  <button onclick="toggleTheme()">🌙 Toggle</button>
+</div>
 
 <div id="chat"></div>
 
@@ -90,28 +106,71 @@
 </div>
 
 <script>
+const chat = document.getElementById("chat");
+
+// =========================
+// LOAD CHAT HISTORY
+// =========================
+function loadHistory() {
+  const history = JSON.parse(localStorage.getItem("chat_history") || "[]");
+  history.forEach(msg => addBubble(msg.text, msg.type));
+}
+
+// =========================
+// SAVE CHAT HISTORY
+// =========================
+function saveMessage(text, type) {
+  const history = JSON.parse(localStorage.getItem("chat_history") || "[]");
+  history.push({ text, type });
+  localStorage.setItem("chat_history", JSON.stringify(history));
+}
+
+// =========================
+// ADD MESSAGE BUBBLE
+// =========================
+function addBubble(text, type) {
+  const bubble = document.createElement("div");
+  bubble.className = "bubble " + type;
+  bubble.innerText = text;
+  chat.appendChild(bubble);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// =========================
+// TYPING EFFECT
+// =========================
+function typeText(element, text, speed = 15) {
+  let i = 0;
+  element.innerText = "";
+
+  function typing() {
+    if (i < text.length) {
+      element.innerText += text.charAt(i);
+      i++;
+      setTimeout(typing, speed);
+    }
+  }
+
+  typing();
+}
+
+// =========================
+// SEND MESSAGE
+// =========================
 async function sendMessage() {
   const inputBox = document.getElementById("input");
   const message = inputBox.value.trim();
   if (!message) return;
 
-  const chat = document.getElementById("chat");
-
-  // Add user bubble
-  const userBubble = document.createElement("div");
-  userBubble.className = "bubble user";
-  userBubble.innerText = message;
-  chat.appendChild(userBubble);
+  addBubble(message, "user");
+  saveMessage(message, "user");
 
   inputBox.value = "";
 
-  // Add loading bubble
-  const loadingBubble = document.createElement("div");
-  loadingBubble.className = "bubble bot";
-  loadingBubble.innerText = "Thinking...";
-  chat.appendChild(loadingBubble);
-
-  chat.scrollTop = chat.scrollHeight;
+  const botBubble = document.createElement("div");
+  botBubble.className = "bubble bot";
+  botBubble.innerText = "Thinking...";
+  chat.appendChild(botBubble);
 
   try {
     const res = await fetch("https://netsuite-ai-production.up.railway.app/chat", {
@@ -119,19 +178,43 @@ async function sendMessage() {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ message: message })
+      body: JSON.stringify({ message })
     });
 
     const data = await res.json();
 
-    loadingBubble.innerText = data.response;
+    typeText(botBubble, data.response);
+    saveMessage(data.response, "bot");
 
   } catch (error) {
-    loadingBubble.innerText = "Error connecting to server";
+    botBubble.innerText = "Error connecting to server";
   }
 
   chat.scrollTop = chat.scrollHeight;
 }
+
+// =========================
+// DARK MODE
+// =========================
+function toggleTheme() {
+  const body = document.body;
+  body.classList.toggle("dark");
+  body.classList.toggle("light");
+
+  localStorage.setItem("theme", body.classList.contains("dark") ? "dark" : "light");
+}
+
+// =========================
+// LOAD THEME
+// =========================
+function loadTheme() {
+  const theme = localStorage.getItem("theme") || "light";
+  document.body.className = theme;
+}
+
+// INIT
+loadTheme();
+loadHistory();
 </script>
 
 </body>
