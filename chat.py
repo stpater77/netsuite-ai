@@ -11,24 +11,27 @@ except:
 LLM_MODEL = "llama3"
 
 # =========================
-# DATABASE CONNECTION (SAFE)
+# DATABASE CONNECTION (FINAL FIX)
 # =========================
 def get_connection():
     try:
-        if os.getenv("DATABASE_URL"):
-            # Railway
+        database_url = os.getenv("DATABASE_URL")
+
+        print(f"DEBUG: DATABASE_URL → {database_url}")
+
+        if database_url:
             print("DEBUG: Using Railway DB")
-            return psycopg2.connect(os.getenv("DATABASE_URL"))
-        else:
-            # Local
-            print("DEBUG: Using Local DB")
-            return psycopg2.connect(
-                host="localhost",
-                port=5433,
-                database="postgres",
-                user="postgres",
-                password=""
-            )
+            return psycopg2.connect(database_url)
+
+        print("DEBUG: Using Local DB")
+        return psycopg2.connect(
+            host="localhost",
+            port=5433,
+            database="postgres",
+            user="postgres",
+            password=""
+        )
+
     except Exception as e:
         print(f"DEBUG: DB connection failed → {e}")
         return None
@@ -61,17 +64,18 @@ INTENT_MAP = {
 }
 
 # =========================
-# INTENT DETECTION
+# INTENT DETECTION (FIXED)
 # =========================
 def detect_intent(query):
     query = query.lower()
 
     for intent, keywords in INTENT_MAP.items():
         for keyword in keywords:
-            words = keyword.split()
-            if all(word in query for word in words):
+            if keyword in query:
+                print(f"DEBUG: Matched keyword → {keyword}")
                 return intent
 
+    print("DEBUG: No intent match")
     return None
 
 # =========================
@@ -161,7 +165,7 @@ def handle_user_message(q: str) -> str:
             print(f"DEBUG: Ollama error → {e}")
 
     # =========================
-    # FALLBACK (RAILWAY SAFE)
+    # FALLBACK (CLOUD SAFE)
     # =========================
     return f"""
 {meta.get('title')}
