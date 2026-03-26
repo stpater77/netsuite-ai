@@ -1,175 +1,76 @@
-import psycopg2
 import os
+import psycopg2
+from openai import OpenAI
 
-# Try importing ollama (local only)
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except:
-    OLLAMA_AVAILABLE = False
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-LLM_MODEL = "llama3"
 
-# =========================
-# DATABASE CONNECTION (FINAL FIX)
-# =========================
-def get_connection():
-    try:
-        database_url = os.getenv("DATABASE_URL")
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
-        print(f"DEBUG: DATABASE_URL → {database_url}")
 
-        if database_url:
-            print("DEBUG: Using Railway DB")
-            return psycopg2.connect(database_url)
+def detect_intent(message):
+    message = message.lower()
 
-        print("DEBUG: Using Local DB")
-        return psycopg2.connect(
-            host="localhost",
-            port=5433,
-            database="postgres",
-            user="postgres",
-            password=""
-        )
+    if "invoice" in message and "sales order" in message:
+        return "ar__invoice__invoice_a_sales_order"
 
-    except Exception as e:
-        print(f"DEBUG: DB connection failed → {e}")
-        return None
+    if "create" in message and "invoice" in message:
+        return "ar__invoice__create_an_invoice"
 
-# =========================
-# INTENT MAP
-# =========================
-INTENT_MAP = {
-    "ar__payment__accept_customer_payments": [
-        "accept payment",
-        "receive payment",
-        "customer payment",
-        "apply payment"
-    ],
-    "ar__invoice__create_an_invoice": [
-        "create invoice",
-        "make invoice",
-        "invoice customer"
-    ],
-    "ar__invoice__invoice_a_sales_order": [
-        "invoice sales order",
-        "bill sales order"
-    ],
-    "ar__credit__create_credit_memo": [
-        "credit memo",
-        "create credit memo",
-        "issue credit",
-        "customer credit"
-    ]
-}
+    if "payment" in message:
+        return "ar__payment__accept_customer_payments"
 
-# =========================
-# INTENT DETECTION (FIXED)
-# =========================
-def detect_intent(query):
-    query = query.lower()
+    if "credit" in message:
+        return "ar__credit__create_credit_memo"
 
-    for intent, keywords in INTENT_MAP.items():
-        for keyword in keywords:
-            if keyword in query:
-                print(f"DEBUG: Matched keyword → {keyword}")
-                return intent
-
-    print("DEBUG: No intent match")
     return None
 
-# =========================
-# SEARCH
-# =========================
-def search(query):
-    intent = detect_intent(query)
-    print(f"DEBUG: Detected intent → {intent}")
 
-    conn = get_connection()
-    if not conn:
-        return None
+def handle_user_message(message):
+    intent = detect_intent(message)
 
-    try:
-        cur = conn.cursor()
+    # -----------------------------
+    # TRY DATABASE MATCH
+    # -----------------------------
+    if intent:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
 
-        if intent:
-            print(f"DEBUG: Intent matched → {intent}")
-
-            cur.execute("""
-                SELECT metadata
-                FROM documents
-                WHERE metadata->>'intent' = %s
-                LIMIT 1
-            """, (intent,))
+            cur.execute(
+                "SELECT metadata FROM documents WHERE metadata->>'intent' = %s",
+                (intent,)
+            )
 
             result = cur.fetchone()
-            print(f"DEBUG: DB result → {result}")
 
-            return result[0] if result else None
+            if result:
+                metadata = result[0]
 
-        return None
+                return f"\n{metadata['title']}\n\nSteps:\n{metadata['steps']}"
+
+        except Exception as e:
+            print("DB error:", e)
+
+    # -----------------------------
+    # GPT FALLBACK (THIS IS THE FIX)
+    # -----------------------------
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a NetSuite expert. Provide clear step-by-step instructions."
+                },
+                {"role": "user", "content": message}
+            ]
+        )
+
+        return response.choices[0].message.content
 
     except Exception as e:
-        print(f"DEBUG: DB error → {e}")
-        conn.rollback()
-        return None
-
-    finally:
-        conn.close()
-
-# =========================
-# PROMPT BUILDER
-# =========================
-def build_prompt(question, meta):
-    return f"""
-You are a NetSuite AI consultant.
-
-Rules:
-- Only use provided workflow
-- Be concise
-- Use numbered steps
-
-QUESTION:
-{question}
-
-WORKFLOW:
-Title: {meta.get('title')}
-Navigation: {meta.get('navigation')}
-Steps: {meta.get('steps')}
-
-ANSWER:
-"""
-
-# =========================
-# MAIN HANDLER
-# =========================
-def handle_user_message(q: str) -> str:
-    meta = search(q)
-
-    if not meta:
-        return "No workflow found"
-
-    prompt = build_prompt(q, meta)
-
-    # =========================
-    # OLLAMA (LOCAL ONLY)
-    # =========================
-    if OLLAMA_AVAILABLE:
-        try:
-            response = ollama.generate(
-                model=LLM_MODEL,
-                prompt=prompt
-            )
-            return response["response"]
-        except Exception as e:
-            print(f"DEBUG: Ollama error → {e}")
-
-    # =========================
-    # FALLBACK (CLOUD SAFE)
-    # =========================
-    return f"""
-{meta.get('title')}
-
-Steps:
-{meta.get('steps')}
-"""
+        print("GPT error:", e)
+        return "Sorry, GPT fallback failed."
