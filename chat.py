@@ -19,11 +19,10 @@ def get_db_connection():
 
 
 # -----------------------------
-# EMBEDDING MATCH FUNCTION
+# EMBEDDING MATCH
 # -----------------------------
 def find_best_match(message):
     try:
-        # Create embedding for user input
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
             input=message
@@ -32,7 +31,6 @@ def find_best_match(message):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Find closest match in DB
         cur.execute("""
             SELECT metadata,
                    embedding <-> %s AS distance
@@ -49,7 +47,7 @@ def find_best_match(message):
 
             print(f"DEBUG: Embedding distance → {distance}")
 
-            # Threshold tuning (0.3–0.6 typical)
+            # 🔥 Adjust threshold if needed
             if distance < 0.5:
                 return metadata
 
@@ -61,24 +59,23 @@ def find_best_match(message):
 
 
 # -----------------------------
-# MAIN HANDLER
+# FORMAT WORKFLOW OUTPUT
 # -----------------------------
-def handle_user_message(message):
+def format_workflow(metadata):
+    title = metadata.get("title", "Workflow")
+    steps = metadata.get("steps", "")
 
-    # 🔥 STEP 1 — EMBEDDING MATCH
-    match = find_best_match(message)
-
-    if match:
-        print("DEBUG: Using embedding match")
-
-        return f"""
-{match.get('title', 'Workflow')}
+    return f"""{title}
 
 Steps:
-{match.get('steps', '')}
+{steps}
 """
 
-    # 🔥 STEP 2 — GPT FALLBACK
+
+# -----------------------------
+# GPT FALLBACK (CLEAN OUTPUT)
+# -----------------------------
+def gpt_fallback(message):
     try:
         print("DEBUG: Using GPT fallback")
 
@@ -87,7 +84,23 @@ Steps:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a NetSuite expert. Provide clear, step-by-step instructions."
+                    "content": """You are a NetSuite assistant.
+
+Respond ONLY in this format:
+
+Title
+
+Steps:
+1. ...
+2. ...
+3. ...
+
+Rules:
+- No explanations
+- No paragraphs
+- Keep it concise
+- Maximum 6 steps
+"""
                 },
                 {
                     "role": "user",
@@ -100,11 +113,27 @@ Steps:
 
     except Exception as e:
         print("GPT error:", e)
-        return "Sorry, I couldn't process your request."
+        return "Error processing request."
 
 
 # -----------------------------
-# OPTIONAL: HEALTH CHECK
+# MAIN HANDLER
+# -----------------------------
+def handle_user_message(message):
+
+    # 🔥 STEP 1 — EMBEDDING MATCH
+    match = find_best_match(message)
+
+    if match:
+        print("DEBUG: Using embedding match")
+        return format_workflow(match)
+
+    # 🔥 STEP 2 — GPT FALLBACK
+    return gpt_fallback(message)
+
+
+# -----------------------------
+# OPTIONAL TEST FUNCTION
 # -----------------------------
 def test_connection():
     try:
