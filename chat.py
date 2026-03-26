@@ -2,70 +2,97 @@ import os
 import psycopg2
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# -----------------------------
+# CONFIG
+# -----------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+client = OpenAI(api_key=OPENAI_API_KEY)
 
+
+# -----------------------------
+# DATABASE CONNECTION
+# -----------------------------
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
-def detect_intent(message):
-    message = message.lower()
-
-    if "invoice" in message and "sales order" in message:
-        return "ar__invoice__invoice_a_sales_order"
-
-    if "create" in message and "invoice" in message:
-        return "ar__invoice__create_an_invoice"
-
-    if "payment" in message:
-        return "ar__payment__accept_customer_payments"
-
-    if "credit" in message:
-        return "ar__credit__create_credit_memo"
-
-    return None
-
-
-def handle_user_message(message):
-    intent = detect_intent(message)
-
-    # -----------------------------
-    # TRY DATABASE MATCH
-    # -----------------------------
-    if intent:
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-
-            cur.execute(
-                "SELECT metadata FROM documents WHERE metadata->>'intent' = %s",
-                (intent,)
-            )
-
-            result = cur.fetchone()
-
-            if result:
-                metadata = result[0]
-
-                return f"\n{metadata['title']}\n\nSteps:\n{metadata['steps']}"
-
-        except Exception as e:
-            print("DB error:", e)
-
-    # -----------------------------
-    # GPT FALLBACK (THIS IS THE FIX)
-    # -----------------------------
+# -----------------------------
+# EMBEDDING MATCH FUNCTION
+# -----------------------------
+def find_best_match(message):
     try:
+        # Create embedding for user input
+        embedding = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=message
+        ).data[0].embedding
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Find closest match in DB
+        cur.execute("""
+            SELECT metadata,
+                   embedding <-> %s AS distance
+            FROM documents
+            ORDER BY distance ASC
+            LIMIT 1
+        """, (embedding,))
+
+        result = cur.fetchone()
+
+        if result:
+            metadata = result[0]
+            distance = result[1]
+
+            print(f"DEBUG: Embedding distance → {distance}")
+
+            # Threshold tuning (0.3–0.6 typical)
+            if distance < 0.5:
+                return metadata
+
+        return None
+
+    except Exception as e:
+        print("Embedding error:", e)
+        return None
+
+
+# -----------------------------
+# MAIN HANDLER
+# -----------------------------
+def handle_user_message(message):
+
+    # 🔥 STEP 1 — EMBEDDING MATCH
+    match = find_best_match(message)
+
+    if match:
+        print("DEBUG: Using embedding match")
+
+        return f"""
+{match.get('title', 'Workflow')}
+
+Steps:
+{match.get('steps', '')}
+"""
+
+    # 🔥 STEP 2 — GPT FALLBACK
+    try:
+        print("DEBUG: Using GPT fallback")
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a NetSuite expert. Provide clear step-by-step instructions."
+                    "content": "You are a NetSuite expert. Provide clear, step-by-step instructions."
                 },
-                {"role": "user", "content": message}
+                {
+                    "role": "user",
+                    "content": message
+                }
             ]
         )
 
@@ -73,4 +100,15 @@ def handle_user_message(message):
 
     except Exception as e:
         print("GPT error:", e)
-        return "Sorry, GPT fallback failed."
+        return "Sorry, I couldn't process your request."
+
+
+# -----------------------------
+# OPTIONAL: HEALTH CHECK
+# -----------------------------
+def test_connection():
+    try:
+        conn = get_db_connection()
+        print("✅ DB connected")
+    except Exception as e:
+        print("❌ DB connection failed:", e)
