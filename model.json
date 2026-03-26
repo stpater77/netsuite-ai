@@ -1,0 +1,9 @@
+[
+  {
+    "id": "netsuite-ai",
+    "name": "netsuite-ai",
+    "provider": "openai",
+    "base_url": "https://netsuite-ai-production.up.railway.app/v1",
+    "api_key": "dummy"
+  }
+]

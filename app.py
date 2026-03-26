@@ -5,7 +5,7 @@ from chat import handle_user_message
 app = FastAPI()
 
 # =========================
-# ORIGINAL CHAT ENDPOINT
+# BASIC CHAT ENDPOINT
 # =========================
 class ChatRequest(BaseModel):
     message: str
@@ -17,20 +17,17 @@ async def chat(req: ChatRequest):
 
 
 # =========================
-# OPENAI / OPENWEBUI COMPATIBLE ENDPOINT
+# OPENAI-COMPATIBLE CHAT ENDPOINT
 # =========================
 class OpenAIRequest(BaseModel):
     messages: list
 
 @app.post("/v1/chat/completions")
 async def openai_compatible(req: OpenAIRequest):
-    # Get last user message
     user_message = req.messages[-1]["content"]
 
-    # Process using your existing logic
     response_text = handle_user_message(user_message)
 
-    # Return OpenAI-style response
     return {
         "id": "chatcmpl-123",
         "object": "chat.completion",
@@ -48,7 +45,24 @@ async def openai_compatible(req: OpenAIRequest):
 
 
 # =========================
-# ROOT (OPTIONAL - FOR BROWSER TEST)
+# REQUIRED FOR OPENWEBUI (THIS FIXES YOUR ISSUE)
+# =========================
+@app.get("/v1/models")
+def list_models():
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "netsuite-ai",
+                "object": "model",
+                "owned_by": "netsuite-ai"
+            }
+        ]
+    }
+
+
+# =========================
+# ROOT ENDPOINT (OPTIONAL)
 # =========================
 @app.get("/")
 def root():
