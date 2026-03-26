@@ -72,7 +72,7 @@ Steps:
 
 
 # -----------------------------
-# GPT FALLBACK (STRICT + CLEAN)
+# GPT FALLBACK (FULL CONTROL)
 # -----------------------------
 def gpt_fallback(message):
     try:
@@ -86,26 +86,8 @@ def gpt_fallback(message):
                     "role": "system",
                     "content": """You are a NetSuite assistant.
 
-You MUST follow this exact format:
-
-Title
-
-Steps:
-1. ...
-2. ...
-3. ...
-
-STRICT RULES:
-- NO explanations
-- NO paragraphs
-- NO tips
-- NO extra sections
-- ONLY return steps
-- Maximum 5 steps
-- Each step must be ONE line
-- Keep it short and direct
-
-If you break format, your answer is wrong.
+Return ONLY short action steps.
+No explanations. No extra sections.
 """
                 },
                 {
@@ -118,12 +100,11 @@ If you break format, your answer is wrong.
         raw = response.choices[0].message.content.strip()
 
         # -----------------------------
-        # HARD CLEANUP (FORCE FORMAT)
+        # CLEAN + REBUILD OUTPUT
         # -----------------------------
         lines = raw.split("\n")
 
-        cleaned = []
-        step_count = 1
+        cleaned_steps = []
 
         for line in lines:
             line = line.strip()
@@ -131,18 +112,26 @@ If you break format, your answer is wrong.
             if not line:
                 continue
 
-            # First line = title
-            if len(cleaned) == 0:
-                cleaned.append(line)
-                cleaned.append("\nSteps:")
+            # Skip junk / headers
+            lower = line.lower()
+            if "step" in lower or "title" in lower:
                 continue
 
-            # Force numbered steps
-            if step_count <= 5:
-                cleaned.append(f"{step_count}. {line}")
-                step_count += 1
+            # Remove numbering if GPT added it
+            if line[0].isdigit():
+                line = line.split(".", 1)[-1].strip()
 
-        return "\n".join(cleaned)
+            cleaned_steps.append(line)
+
+        # Build final clean output
+        title = message.strip().capitalize()
+
+        result = [title, "", "Steps:"]
+
+        for i, step in enumerate(cleaned_steps[:5], start=1):
+            result.append(f"{i}. {step}")
+
+        return "\n".join(result)
 
     except Exception as e:
         print("GPT error:", e)
