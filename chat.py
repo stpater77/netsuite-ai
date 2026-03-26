@@ -58,21 +58,41 @@ def find_best_match(message):
 
 
 # -----------------------------
-# FORMAT WORKFLOW OUTPUT
+# CLEAN DB WORKFLOW OUTPUT
 # -----------------------------
 def format_workflow(metadata):
     title = metadata.get("title", "Workflow")
     steps = metadata.get("steps", "")
 
-    return f"""{title}
+    lines = steps.split("\n")
+    cleaned_steps = []
 
-Steps:
-{steps}
-"""
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # Remove duplicate "Steps"
+        if "step" in line.lower():
+            continue
+
+        # Remove numbering if present
+        if line[0].isdigit():
+            line = line.split(".", 1)[-1].strip()
+
+        cleaned_steps.append(line)
+
+    result = [title, "", "Steps:"]
+
+    for i, step in enumerate(cleaned_steps[:5], start=1):
+        result.append(f"{i}. {step}")
+
+    return "\n".join(result)
 
 
 # -----------------------------
-# GPT FALLBACK (FULL CONTROL)
+# GPT FALLBACK (STRICT + CLEAN)
 # -----------------------------
 def gpt_fallback(message):
     try:
@@ -85,10 +105,7 @@ def gpt_fallback(message):
                 {
                     "role": "system",
                     "content": """You are a NetSuite assistant.
-
-Return ONLY short action steps.
-No explanations. No extra sections.
-"""
+Return only short action steps. No explanations."""
                 },
                 {
                     "role": "user",
@@ -99,11 +116,7 @@ No explanations. No extra sections.
 
         raw = response.choices[0].message.content.strip()
 
-        # -----------------------------
-        # CLEAN + REBUILD OUTPUT
-        # -----------------------------
         lines = raw.split("\n")
-
         cleaned_steps = []
 
         for line in lines:
@@ -112,18 +125,16 @@ No explanations. No extra sections.
             if not line:
                 continue
 
-            # Skip junk / headers
-            lower = line.lower()
-            if "step" in lower or "title" in lower:
+            # Remove junk
+            if "step" in line.lower():
                 continue
 
-            # Remove numbering if GPT added it
+            # Remove numbering
             if line[0].isdigit():
                 line = line.split(".", 1)[-1].strip()
 
             cleaned_steps.append(line)
 
-        # Build final clean output
         title = message.strip().capitalize()
 
         result = [title, "", "Steps:"]
@@ -143,19 +154,19 @@ No explanations. No extra sections.
 # -----------------------------
 def handle_user_message(message):
 
-    # 🔥 STEP 1 — EMBEDDING MATCH
+    # 1. Try embedding match
     match = find_best_match(message)
 
     if match:
         print("DEBUG: Using embedding match")
         return format_workflow(match)
 
-    # 🔥 STEP 2 — GPT FALLBACK
+    # 2. Fallback to GPT
     return gpt_fallback(message)
 
 
 # -----------------------------
-# OPTIONAL TEST FUNCTION
+# OPTIONAL TEST
 # -----------------------------
 def test_connection():
     try:
