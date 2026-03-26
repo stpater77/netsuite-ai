@@ -47,7 +47,6 @@ def find_best_match(message):
 
             print(f"DEBUG: Embedding distance → {distance}")
 
-            # 🔥 Adjust threshold if needed
             if distance < 0.5:
                 return metadata
 
@@ -73,7 +72,7 @@ Steps:
 
 
 # -----------------------------
-# GPT FALLBACK (CLEAN OUTPUT)
+# GPT FALLBACK (STRICT + CLEAN)
 # -----------------------------
 def gpt_fallback(message):
     try:
@@ -81,12 +80,13 @@ def gpt_fallback(message):
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
+            temperature=0.2,
             messages=[
                 {
                     "role": "system",
                     "content": """You are a NetSuite assistant.
 
-Respond ONLY in this format:
+You MUST follow this exact format:
 
 Title
 
@@ -95,11 +95,17 @@ Steps:
 2. ...
 3. ...
 
-Rules:
-- No explanations
-- No paragraphs
-- Keep it concise
-- Maximum 6 steps
+STRICT RULES:
+- NO explanations
+- NO paragraphs
+- NO tips
+- NO extra sections
+- ONLY return steps
+- Maximum 5 steps
+- Each step must be ONE line
+- Keep it short and direct
+
+If you break format, your answer is wrong.
 """
                 },
                 {
@@ -109,7 +115,34 @@ Rules:
             ]
         )
 
-        return response.choices[0].message.content
+        raw = response.choices[0].message.content.strip()
+
+        # -----------------------------
+        # HARD CLEANUP (FORCE FORMAT)
+        # -----------------------------
+        lines = raw.split("\n")
+
+        cleaned = []
+        step_count = 1
+
+        for line in lines:
+            line = line.strip()
+
+            if not line:
+                continue
+
+            # First line = title
+            if len(cleaned) == 0:
+                cleaned.append(line)
+                cleaned.append("\nSteps:")
+                continue
+
+            # Force numbered steps
+            if step_count <= 5:
+                cleaned.append(f"{step_count}. {line}")
+                step_count += 1
+
+        return "\n".join(cleaned)
 
     except Exception as e:
         print("GPT error:", e)
