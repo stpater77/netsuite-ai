@@ -1,5 +1,6 @@
 import os
 import psycopg2
+import requests
 from openai import OpenAI
 
 # -----------------------------
@@ -10,6 +11,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+N8N_WEBHOOK_URL = "https://n8n-production-1479.up.railway.app/webhook/ai-action"
+
 
 # -----------------------------
 # DATABASE CONNECTION
@@ -19,7 +22,7 @@ def get_db_connection():
 
 
 # -----------------------------
-# EMBEDDING MATCH
+# EMBEDDING SEARCH
 # -----------------------------
 def find_best_match(message):
     try:
@@ -58,7 +61,7 @@ def find_best_match(message):
 
 
 # -----------------------------
-# CLEAN DB WORKFLOW OUTPUT
+# CLEAN DB OUTPUT
 # -----------------------------
 def format_workflow(metadata):
     title = metadata.get("title", "Workflow")
@@ -73,11 +76,11 @@ def format_workflow(metadata):
         if not line:
             continue
 
-        # Remove duplicate "Steps"
+        # Remove junk headers
         if "step" in line.lower():
             continue
 
-        # Remove numbering if present
+        # Remove numbering if exists
         if line[0].isdigit():
             line = line.split(".", 1)[-1].strip()
 
@@ -92,7 +95,27 @@ def format_workflow(metadata):
 
 
 # -----------------------------
-# GPT FALLBACK (STRICT + CLEAN)
+# CALL N8N (AUTOMATION)
+# -----------------------------
+def call_n8n(message):
+    try:
+        response = requests.post(
+            N8N_WEBHOOK_URL,
+            json={"message": message}
+        )
+
+        if response.status_code == 200:
+            return True
+
+        return False
+
+    except Exception as e:
+        print("n8n error:", e)
+        return False
+
+
+# -----------------------------
+# GPT FALLBACK
 # -----------------------------
 def gpt_fallback(message):
     try:
@@ -125,11 +148,9 @@ Return only short action steps. No explanations."""
             if not line:
                 continue
 
-            # Remove junk
             if "step" in line.lower():
                 continue
 
-            # Remove numbering
             if line[0].isdigit():
                 line = line.split(".", 1)[-1].strip()
 
@@ -154,19 +175,25 @@ Return only short action steps. No explanations."""
 # -----------------------------
 def handle_user_message(message):
 
-    # 1. Try embedding match
+    # 1️⃣ Try DB (embeddings)
     match = find_best_match(message)
 
     if match:
         print("DEBUG: Using embedding match")
         return format_workflow(match)
 
-    # 2. Fallback to GPT
+    # 2️⃣ Trigger automation (n8n)
+    triggered = call_n8n(message)
+
+    if triggered:
+        return "✅ Action triggered successfully"
+
+    # 3️⃣ Fallback to GPT
     return gpt_fallback(message)
 
 
 # -----------------------------
-# OPTIONAL TEST
+# TEST CONNECTION (OPTIONAL)
 # -----------------------------
 def test_connection():
     try:
