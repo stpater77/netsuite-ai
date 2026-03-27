@@ -137,8 +137,6 @@ def call_openai(query):
 
 
 def handle_query(query):
-    return f"RAG WORKING: {query}"
-
     try:
         section = detect_section(query)
 
