@@ -1,4 +1,5 @@
 import os
+import re
 import psycopg2
 from openai import OpenAI
 
@@ -18,12 +19,27 @@ def clean_step_text(step):
 
     step = str(step).strip()
 
+    # Remove markdown bold markers
+    step = step.replace("**", "")
+
     # Remove leading numeric prefixes like "1. "
     if step and step[0].isdigit() and "." in step[:5]:
         step = step.split(".", 1)[-1].strip()
 
-    # Light cleanup of extra whitespace
+    # Remove common NetSuite / ERP / SuiteFlow footer noise
+    step = re.sub(r"NetSuite:.*?\|\s*.*$", "", step, flags=re.IGNORECASE).strip()
+    step = re.sub(r"ERP:\s*Fundamentals.*?\|\s*.*$", "", step, flags=re.IGNORECASE).strip()
+    step = re.sub(r"ERP Fundamentals.*?\|\s*.*$", "", step, flags=re.IGNORECASE).strip()
+    step = re.sub(r"SuiteFlow:.*?\|\s*.*$", "", step, flags=re.IGNORECASE).strip()
+
+    # Remove trailing page-number fragments like "| 27"
+    step = re.sub(r"\|\s*\d+\s*$", "", step).strip()
+
+    # Remove repeated spaces
     step = " ".join(step.split())
+
+    # Remove trailing punctuation fragments left after cleanup
+    step = step.strip(" -|")
 
     return step
 
@@ -63,7 +79,6 @@ def find_best_match(message):
 
         print(f"DEBUG: Best embedding distance -> {best_distance}")
 
-        # Slightly more forgiving than the old 0.5 threshold
         if best_distance < 1.0:
             return {
                 "content": best_content,
@@ -86,7 +101,6 @@ def format_workflow(match):
     navigation = metadata.get("navigation") or ""
     steps = metadata.get("steps") or []
 
-    # Handle either list or string just in case
     if isinstance(steps, str):
         raw_steps = [s.strip() for s in steps.split("\n") if s.strip()]
     elif isinstance(steps, list):
@@ -145,7 +159,6 @@ def gpt_fallback(message):
         )
 
         raw = response.choices[0].message.content.strip()
-
         lines = [line.strip() for line in raw.split("\n") if line.strip()]
 
         title = message.strip().capitalize()
