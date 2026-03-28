@@ -10,6 +10,21 @@ def root():
     return {"status": "netsuite-ai running"}
 
 
+@app.get("/v1/models")
+def list_models():
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "netsuite-ai",
+                "object": "model",
+                "created": 1743134400,
+                "owned_by": "openai"
+            }
+        ]
+    }
+
+
 @app.post("/v1/chat/completions")
 async def chat(req: Request):
     try:
@@ -23,7 +38,6 @@ async def chat(req: Request):
             )
 
         user_msg = messages[-1].get("content", "")
-
         if not user_msg:
             return JSONResponse(
                 status_code=400,
@@ -35,6 +49,8 @@ async def chat(req: Request):
         return {
             "id": "netsuite-ai-response",
             "object": "chat.completion",
+            "created": 1743134400,
+            "model": "netsuite-ai",
             "choices": [
                 {
                     "index": 0,
@@ -49,7 +65,6 @@ async def chat(req: Request):
 
     except Exception as e:
         print("APP ERROR:", str(e))
-
         return JSONResponse(
             status_code=500,
             content={
