@@ -12,6 +12,22 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
+def clean_step_text(step):
+    if not step:
+        return ""
+
+    step = str(step).strip()
+
+    # Remove leading numeric prefixes like "1. "
+    if step and step[0].isdigit() and "." in step[:5]:
+        step = step.split(".", 1)[-1].strip()
+
+    # Light cleanup of extra whitespace
+    step = " ".join(step.split())
+
+    return step
+
+
 def find_best_match(message):
     try:
         embedding = client.embeddings.create(
@@ -22,27 +38,38 @@ def find_best_match(message):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        cur.execute("""
-            SELECT metadata,
-                   embedding <-> %s AS distance
+        cur.execute(
+            """
+            SELECT
+                content,
+                metadata,
+                embedding <-> %s::vector AS distance
             FROM documents
             ORDER BY distance ASC
-            LIMIT 1
-        """, (embedding,))
+            LIMIT 3
+            """,
+            (embedding,)
+        )
 
-        result = cur.fetchone()
+        results = cur.fetchall()
 
         cur.close()
         conn.close()
 
-        if result:
-            metadata = result[0]
-            distance = result[1]
+        if not results:
+            return None
 
-            print(f"DEBUG: Embedding distance -> {distance}")
+        best_content, best_metadata, best_distance = results[0]
 
-            if distance < 0.5:
-                return metadata
+        print(f"DEBUG: Best embedding distance -> {best_distance}")
+
+        # Slightly more forgiving than the old 0.5 threshold
+        if best_distance < 1.0:
+            return {
+                "content": best_content,
+                "metadata": best_metadata,
+                "distance": best_distance
+            }
 
         return None
 
@@ -51,31 +78,44 @@ def find_best_match(message):
         return None
 
 
-def format_workflow(metadata):
-    title = metadata.get("title", "Workflow")
-    steps = metadata.get("steps", "")
+def format_workflow(match):
+    metadata = match.get("metadata", {}) or {}
 
-    lines = steps.split("\n")
+    title = metadata.get("title") or "NetSuite Procedure"
+    module = metadata.get("module") or ""
+    navigation = metadata.get("navigation") or ""
+    steps = metadata.get("steps") or []
+
+    # Handle either list or string just in case
+    if isinstance(steps, str):
+        raw_steps = [s.strip() for s in steps.split("\n") if s.strip()]
+    elif isinstance(steps, list):
+        raw_steps = [str(s).strip() for s in steps if str(s).strip()]
+    else:
+        raw_steps = []
+
     cleaned_steps = []
+    for step in raw_steps:
+        cleaned = clean_step_text(step)
+        if cleaned:
+            cleaned_steps.append(cleaned)
 
-    for line in lines:
-        line = line.strip()
+    result = [title]
 
-        if not line:
-            continue
+    if module:
+        result.append(f"Module: {module}")
 
-        if "step" in line.lower():
-            continue
+    if navigation:
+        result.append(f"Navigation: {navigation}")
 
-        if line and line[0].isdigit():
-            line = line.split(".", 1)[-1].strip()
-
-        cleaned_steps.append(line)
-
-    result = [title, "", "Steps:"]
+    result.append("")
+    result.append("Steps:")
 
     for i, step in enumerate(cleaned_steps[:5], start=1):
         result.append(f"{i}. {step}")
+
+    if not cleaned_steps:
+        result.append("1. No detailed steps were found in the matched procedure.")
 
     return "\n".join(result)
 
@@ -90,7 +130,12 @@ def gpt_fallback(message):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a NetSuite assistant. Return only short action steps. No explanations."
+                    "content": (
+                        "You are a NetSuite assistant. "
+                        "If the question is about NetSuite, answer with short, direct action steps. "
+                        "If the exact internal procedure is not available, give a safe general answer. "
+                        "Keep the answer concise."
+                    )
                 },
                 {
                     "role": "user",
@@ -101,29 +146,23 @@ def gpt_fallback(message):
 
         raw = response.choices[0].message.content.strip()
 
-        lines = raw.split("\n")
-        cleaned_steps = []
-
-        for line in lines:
-            line = line.strip()
-
-            if not line:
-                continue
-
-            if "step" in line.lower():
-                continue
-
-            if line and line[0].isdigit():
-                line = line.split(".", 1)[-1].strip()
-
-            cleaned_steps.append(line)
+        lines = [line.strip() for line in raw.split("\n") if line.strip()]
 
         title = message.strip().capitalize()
-
         result = [title, "", "Steps:"]
 
-        for i, step in enumerate(cleaned_steps[:5], start=1):
-            result.append(f"{i}. {step}")
+        step_num = 1
+        for line in lines:
+            cleaned = clean_step_text(line)
+            if not cleaned:
+                continue
+            result.append(f"{step_num}. {cleaned}")
+            step_num += 1
+            if step_num > 5:
+                break
+
+        if step_num == 1:
+            result.append("1. No fallback steps were generated.")
 
         return "\n".join(result)
 
