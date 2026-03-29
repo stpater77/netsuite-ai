@@ -12,7 +12,7 @@ EMBED_MODEL = "text-embedding-3-small"
 FALLBACK_MODEL = "gpt-4o-mini"
 
 STRICT_MATCH_DISTANCE = 1.0
-OVERVIEW_MATCH_DISTANCE = 1.05
+OVERVIEW_MATCH_DISTANCE = 1.03
 CANDIDATE_LIMIT = 12
 
 STOPWORDS = {
@@ -27,11 +27,12 @@ STOPWORDS = {
 TOPIC_KEYWORDS = {
     "accounts_receivable": [
         "accounts receivable", "receivable", "invoice", "invoices", "billing",
-        "payment", "payments", "customer payments", "cash sale", "ar"
+        "payment", "payments", "customer payments", "cash sale", "sales order"
     ],
     "manufacturing": [
         "manufacturing", "work order", "work orders", "assembly",
-        "bill of materials", "bom", "build", "production", "components"
+        "bill of materials", "bom", "build", "production", "components",
+        "routing", "work center"
     ],
     "administrator": [
         "administrator", "admin", "role", "roles", "permissions",
@@ -39,7 +40,8 @@ TOPIC_KEYWORDS = {
     ],
     "suiteanalytics": [
         "suiteanalytics", "report", "reports", "reporting", "saved search",
-        "saved searches", "search", "searches", "dashboard", "dashboards"
+        "saved searches", "search", "searches", "dashboard", "dashboards",
+        "financial reports"
     ],
     "financial_management": [
         "financial management", "financial", "budget", "forecast",
@@ -47,19 +49,52 @@ TOPIC_KEYWORDS = {
     ]
 }
 
-OFF_TOPIC_PATTERNS = {
+TOPIC_PREFERRED_TERMS = {
+    "accounts_receivable": [
+        "accept customer payments",
+        "create an invoice",
+        "invoice sales orders",
+        "customers > accounts receivable",
+        "customers > sales > create invoices",
+        "accounts receivable"
+    ],
+    "manufacturing": [
+        "bill of materials",
+        "work order",
+        "routing",
+        "work center",
+        "assembly",
+        "manufacturing"
+    ],
+    "administrator": [
+        "general preferences",
+        "roles",
+        "permissions",
+        "employee",
+        "administrator"
+    ],
+    "suiteanalytics": [
+        "saved search",
+        "reports overview",
+        "financial reports",
+        "standard income statement",
+        "suiteanalytics"
+    ]
+}
+
+TOPIC_OFF_LIMITS = {
+    "accounts_receivable": [
+        "summary account",
+        "work order",
+        "bill of materials",
+        "assembly",
+        "manufacturing"
+    ],
     "manufacturing": [
         "general preferences",
-        "inline editing",
         "saved search",
         "accept customer payments",
         "accounts receivable"
-    ],
-    "accounts_receivable": [
-        "work order",
-        "assembly",
-        "bill of materials",
-        "manufacturing"
     ],
     "administrator": [
         "accept customer payments",
@@ -144,7 +179,7 @@ def detect_topic(message):
         for kw in keywords:
             if kw in text:
                 score += 1
-        if score:
+        if score > 0:
             scores[topic] = score
 
     if not scores:
@@ -190,7 +225,7 @@ def fetch_candidate_matches(message, limit=CANDIDATE_LIMIT):
                 "distance": float(distance)
             })
 
-        print("DEBUG: top distances ->", [round(m["distance"], 4) for m in matches[:8]])
+        print("DEBUG: top distances ->", [round(m["distance"], 4) for m in matches[:10]])
         return matches
 
     except Exception as e:
@@ -217,6 +252,14 @@ def get_match_text_blob(match):
     return " ".join([p for p in parts if p]).lower()
 
 
+def get_title_navigation_module(match):
+    metadata = match.get("metadata", {}) or {}
+    title = normalize_text(metadata.get("title")).lower()
+    navigation = normalize_text(metadata.get("navigation")).lower()
+    module = normalize_text(metadata.get("module")).lower()
+    return f"{title} {navigation} {module}".strip()
+
+
 def topic_alignment_score(topic, blob):
     if not topic:
         return 0
@@ -228,28 +271,31 @@ def topic_alignment_score(topic, blob):
     return score
 
 
+def preferred_term_score(topic, blob):
+    if not topic:
+        return 0
+
+    score = 0
+    for kw in TOPIC_PREFERRED_TERMS.get(topic, []):
+        if kw in blob:
+            score += 1
+    return score
+
+
 def off_topic_penalty(topic, blob):
     if not topic:
         return 0
 
     penalty = 0
-    for pattern in OFF_TOPIC_PATTERNS.get(topic, []):
+    for pattern in TOPIC_OFF_LIMITS.get(topic, []):
         if pattern in blob:
             penalty += 1
     return penalty
 
 
-def get_title_and_navigation_text(match):
-    metadata = match.get("metadata", {}) or {}
-    title = normalize_text(metadata.get("title")).lower()
-    navigation = normalize_text(metadata.get("navigation")).lower()
-    module = normalize_text(metadata.get("module")).lower()
-    return f"{title} {navigation} {module}".strip()
-
-
 def exact_intent_score(message, match):
     text = message.lower()
-    title_nav = get_title_and_navigation_text(match)
+    title_nav = get_title_navigation_module(match)
     score = 0
 
     if "invoice" in text and "invoice" in title_nav:
@@ -273,7 +319,7 @@ def exact_intent_score(message, match):
     if "accept" in text and "accept" in title_nav:
         score += 2
 
-    if "create an invoice" in text and "create invoice" in title_nav:
+    if "create an invoice" in text and ("create an invoice" in title_nav or "create invoices" in title_nav):
         score += 8
     if "accept customer payments" in text and "accept customer payments" in title_nav:
         score += 8
@@ -326,18 +372,21 @@ def rerank_overview_matches(message, matches):
         blob = get_match_text_blob(match)
         overlap = sum(1 for token in query_tokens if token in blob)
         topic_score = topic_alignment_score(topic, blob)
+        preferred_score = preferred_term_score(topic, blob)
         penalty = off_topic_penalty(topic, blob)
 
         overview_score = (
             match["distance"]
-            - (overlap * 0.02)
+            - (overlap * 0.015)
             - (topic_score * 0.10)
-            + (penalty * 0.15)
+            - (preferred_score * 0.12)
+            + (penalty * 0.20)
         )
 
         enriched = dict(match)
         enriched["overlap"] = overlap
         enriched["topic_score"] = topic_score
+        enriched["preferred_score"] = preferred_score
         enriched["penalty"] = penalty
         enriched["overview_score"] = overview_score
         ranked.append(enriched)
@@ -349,6 +398,7 @@ def rerank_overview_matches(message, matches):
             "title": normalize_text(m.get("metadata", {}).get("title", "Untitled")),
             "distance": round(m["distance"], 4),
             "topic_score": m.get("topic_score", 0),
+            "preferred_score": m.get("preferred_score", 0),
             "penalty": m.get("penalty", 0),
             "overview_score": round(m["overview_score"], 4)
         }
@@ -386,15 +436,19 @@ def select_overview_matches(message, matches, max_matches=3):
     return selected
 
 
-def has_coherent_overview_cluster(message, matches):
+def overview_cluster_strength(message, matches):
     topic = detect_topic(message)
     if len(matches) < 2:
-        return False
-    if not topic:
-        return True
+        return "weak"
 
     aligned = [m for m in matches if m.get("topic_score", 0) > 0 and m.get("penalty", 0) == 0]
-    return len(aligned) >= 2
+    preferred = [m for m in aligned if m.get("preferred_score", 0) > 0]
+
+    if topic and len(aligned) >= 2 and len(preferred) >= 2:
+        return "strong"
+    if len(aligned) >= 2:
+        return "moderate"
+    return "weak"
 
 
 def format_workflow(match):
@@ -435,6 +489,91 @@ def format_workflow(match):
     return "\n".join(result)
 
 
+def deterministic_area_label(topic, match):
+    title_nav = get_title_navigation_module(match)
+
+    if topic == "accounts_receivable":
+        if "accept customer payments" in title_nav or "customer payments" in title_nav:
+            return "Accepting customer payments"
+        if "create an invoice" in title_nav or "create invoices" in title_nav or "invoice sales orders" in title_nav:
+            return "Creating and issuing invoices"
+        if "cash sale" in title_nav:
+            return "Handling customer sales transactions"
+
+    if topic == "manufacturing":
+        if "bill of materials" in title_nav or "bom" in title_nav:
+            return "Defining bills of materials"
+        if "work order" in title_nav:
+            return "Managing work orders"
+        if "routing" in title_nav:
+            return "Configuring production routings"
+        if "work center" in title_nav:
+            return "Setting up work centers"
+        if "assembly" in title_nav:
+            return "Managing assembly items"
+
+    if topic == "administrator":
+        if "general preferences" in title_nav:
+            return "Configuring general preferences"
+        if "role" in title_nav or "permission" in title_nav:
+            return "Managing roles and permissions"
+        if "employee" in title_nav:
+            return "Managing employee setup"
+
+    if topic == "suiteanalytics":
+        if "saved search" in title_nav:
+            return "Creating and managing saved searches"
+        if "reports overview" in title_nav or "report" in title_nav:
+            return "Reviewing and customizing reports"
+        if "dashboard" in title_nav:
+            return "Using dashboards and reporting views"
+
+    metadata = match.get("metadata", {}) or {}
+    title = normalize_text(metadata.get("title")) or "NetSuite procedure"
+    return title
+
+
+def build_representative_procedure_line(match):
+    metadata = match.get("metadata", {}) or {}
+    title = normalize_text(metadata.get("title")) or "NetSuite Procedure"
+    navigation = normalize_text(metadata.get("navigation"))
+    module = normalize_text(metadata.get("module"))
+
+    extras = []
+    if module:
+        extras.append(f"Module: {module}")
+    if navigation:
+        extras.append(f"Navigation: {navigation}")
+
+    if extras:
+        return f"{title} — " + " | ".join(extras)
+    return title
+
+
+def deterministic_overview(message, matches):
+    topic = detect_topic(message)
+    title = message.strip()
+    area_lines = []
+    seen_areas = set()
+
+    for match in matches[:3]:
+        area = deterministic_area_label(topic, match)
+        if area.lower() not in seen_areas:
+            area_lines.append(area)
+            seen_areas.add(area.lower())
+
+    result = [title, "", "Main Areas:"]
+    for area in area_lines[:4]:
+        result.append(f"- {area}")
+
+    result.append("")
+    result.append("Representative Procedures:")
+    for i, match in enumerate(matches[:3], start=1):
+        result.append(f"{i}. {build_representative_procedure_line(match)}")
+
+    return "\n".join(result)
+
+
 def build_match_context(match):
     metadata = match.get("metadata", {}) or {}
     title = normalize_text(metadata.get("title")) or "Untitled"
@@ -455,7 +594,7 @@ def build_match_context(match):
         cleaned = clean_step_text(step)
         if cleaned:
             cleaned_steps.append(cleaned)
-        if len(cleaned_steps) >= 3:
+        if len(cleaned_steps) >= 2:
             break
 
     lines = [f"Title: {title}"]
@@ -471,29 +610,6 @@ def build_match_context(match):
             lines.append(f"{i}. {step}")
 
     return "\n".join(lines)
-
-
-def deterministic_overview(message, matches):
-    topic_name = message.strip()
-    result = [topic_name, "", "Main Areas:"]
-
-    for match in matches[:3]:
-        title = normalize_text(match.get("metadata", {}).get("title")) or "NetSuite Procedure"
-        result.append(f"- {title}")
-
-    result.append("")
-    result.append("Representative Procedures:")
-
-    for i, match in enumerate(matches[:3], start=1):
-        metadata = match.get("metadata", {}) or {}
-        title = normalize_text(metadata.get("title")) or "NetSuite Procedure"
-        navigation = normalize_text(metadata.get("navigation"))
-        if navigation:
-            result.append(f"{i}. {title} — Navigation: {navigation}")
-        else:
-            result.append(f"{i}. {title}")
-
-    return "\n".join(result)
 
 
 def synthesize_overview(message, matches):
@@ -514,10 +630,11 @@ def synthesize_overview(message, matches):
                     "role": "system",
                     "content": (
                         "You are a NetSuite consultant assistant. "
-                        "Answer ONLY from the provided retrieved procedures. "
+                        "Answer ONLY from the retrieved procedures. "
                         "Do not invent workflows. "
-                        "Do not include off-topic material. "
+                        "Do not generalize beyond the provided procedure evidence. "
                         "Use the actual topic from the user's question. "
+                        "Prefer naming concrete procedure areas and navigation paths already present in context. "
                         "Format exactly like this:\n\n"
                         "Short title line\n\n"
                         "Main Areas:\n"
@@ -528,7 +645,7 @@ def synthesize_overview(message, matches):
                         "1. procedure\n"
                         "2. procedure\n"
                         "3. procedure\n\n"
-                        "If the retrieved procedures are weak or mixed, reply exactly: INSUFFICIENT_CONTEXT"
+                        "If the evidence is weak or mixed, reply exactly: INSUFFICIENT_CONTEXT"
                     )
                 },
                 {
@@ -603,24 +720,29 @@ def handle_user_message(message):
     if is_overview_prompt(message):
         ranked = rerank_overview_matches(message, matches)
         overview_matches = select_overview_matches(message, ranked, max_matches=3)
+        strength = overview_cluster_strength(message, overview_matches)
 
         print("DEBUG: selected overview ->", [
             {
                 "title": normalize_text(m.get("metadata", {}).get("title", "Untitled")),
                 "distance": round(m["distance"], 4),
                 "topic_score": m.get("topic_score", 0),
+                "preferred_score": m.get("preferred_score", 0),
                 "penalty": m.get("penalty", 0)
             }
             for m in overview_matches
         ])
+        print("DEBUG: overview strength ->", strength)
 
-        if has_coherent_overview_cluster(message, overview_matches):
+        if strength == "strong":
             synthesized = synthesize_overview(message, overview_matches)
             if synthesized:
                 return synthesized
             return deterministic_overview(message, overview_matches)
 
-        # If overview grounding is weak, do not force a bad synthetic answer.
+        if strength == "moderate":
+            return deterministic_overview(message, overview_matches)
+
         return gpt_fallback(message)
 
     ranked = rerank_narrow_matches(message, matches)
