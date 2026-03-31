@@ -14,6 +14,7 @@ FALLBACK_MODEL = "gpt-4o-mini"
 STRICT_MATCH_DISTANCE = 1.0
 OVERVIEW_MATCH_DISTANCE = 1.03
 CANDIDATE_LIMIT = 12
+STEP_CAP = 30
 
 STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "with",
@@ -480,7 +481,7 @@ def format_workflow(match):
     result.append("")
     result.append("Steps:")
 
-    for i, step in enumerate(cleaned_steps[:5], start=1):
+    for i, step in enumerate(cleaned_steps[:STEP_CAP], start=1):
         result.append(f"{i}. {step}")
 
     if not cleaned_steps:
@@ -594,7 +595,7 @@ def build_match_context(match):
         cleaned = clean_step_text(step)
         if cleaned:
             cleaned_steps.append(cleaned)
-        if len(cleaned_steps) >= 2:
+        if len(cleaned_steps) >= STEP_CAP:
             break
 
     lines = [f"Title: {title}"]
@@ -698,7 +699,7 @@ def gpt_fallback(message):
                 continue
             result.append(f"{step_num}. {cleaned}")
             step_num += 1
-            if step_num > 5:
+            if step_num > STEP_CAP:
                 break
 
         if step_num == 1:
